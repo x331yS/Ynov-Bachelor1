@@ -1,0 +1,75 @@
+#Renommer l'ordinateur :
+Rename-Computer -NewName SRV-WIN2019 -Restart
+
+#Ajouter le rôle DNS :
+Add-WindowsFeature DNS
+
+#Ajouter les outils de gestion graphique et commandes du serveur DNS :
+Add-WindowsFeature RSAT-DNS-Server
+
+#Ajouter la zone de recherche directe primaire :
+Add-DnsServerPrimaryZone -Name contoso.adds -ZoneFile contoso.adds.dns
+
+#Ajouter la zone de recherche inversée primaire :
+Add-DnsServerPrimaryZone -NetworkID 192.168.5/24 -ZoneFile 5.168.192.in-addr.arpa.dns
+
+#Ajouter l'hôte srv-win2019 ayant pour IP 192.168.5.11 (type A) dans la zone de recherche directe primaire :
+Add-DnsServerResourceRecordA -Name srv-win2019 -ZoneName contoso.adds -IPv4Address 192.168.5.11 -CreatePtr
+
+#Ajouter un alias (type CNAME) nommé TestAlias de l'hôte srv-win2019 dans la zone de recherche directe primaire :
+Add-DnsServerResourceRecordCName -Name TestAlias -HostNameAlias srv-win2019.contoso.adds -ZoneName contoso.adds
+
+#Ajouter l'hôte (votre machine physique) ayant pour IP 10.31.?.? (type A) dans la zone de recherche directe primaire :
+Add-DnsServerResourceRecordA -Name hote -ZoneName contoso.adds -IPv4Address IPMACHINEHOTE
+
+
+#Compléments :
+Update-Help
+
+#
+# Script Windows PowerShell pour le déploiement d’AD DS
+#
+
+
+
+
+#
+#Installation du rôle ADDS
+#
+Install-WindowsFeature Ad-Domain-Services
+
+#
+#Promotion du serveur en tant que controleur de domaine Active Directory
+#
+Import-Module ADDSDeployment
+Install-ADDSForest `
+-CreateDnsDelegation:$false `
+-DatabasePath "D:\ADDS\NTDS" `
+-DomainMode "WinThreshold" `
+-DomainName "contoso.adds" `
+-DomainNetbiosName "CONTOSO" `
+-ForestMode "WinThreshold" `
+-InstallDns:$true `
+-LogPath "D:\ADDS\NTDS" `
+-NoRebootOnCompletion:$false `
+-SysvolPath "D:\ADDS\SYSVOL" `
+-Force:$true
+
+
+
+
+Install-WindowsFeature -Name DHCP
+#Ajouter -IncludeManagementTools à la commande précédente si besoin de la console graphique
+Add-DhcpServerSecurityGroup
+Add-DhcpServerInDC -DnsName srv-win2019.contoso.adds 192.168.5.11
+Restart-Service DHCPServer
+Set-ItemProperty –Path registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\ServerManager\Roles\12 –Name ConfigurationState –Value 2
+
+Add-DhcpServerv4Scope -Name 192.168.5.101-110 -StartRange 192.168.5.101 -EndRange 192.168.5.110 -SubnetMask 255.255.255.0
+Add-DhcpServerv4ExclusionRange -ScopeId 192.168.5.0 -StartRange 192.168.5.101 -EndRange 192.168.5.110
+
+Add-DhcpServerv4Reservation -ScopeId 192.168.5.0 -IPAddress 192.168.5.101 -ClientId 01-23-45-67-89-AB -Name "PC-Client01"
+
+Set-DhcpServerv4OptionValue -OptionId 3 -value 192.168.5.2 -ScopeId 192.168.5.0
+Set-DhcpServerv4OptionValue -OptionId 6 -value 192.168.5.11 -ScopeId 192.168.5.0
+Set-DhcpServerv4OptionValue -OptionId 15 -value contoso.adds -ScopeId 192.168.5.0
